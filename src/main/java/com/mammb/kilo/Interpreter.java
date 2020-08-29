@@ -1,19 +1,11 @@
 package com.mammb.kilo;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Scanner;
-import java.util.StringJoiner;
+import java.nio.file.*;
+import java.util.*;
 import java.util.stream.Collectors;
 import static com.mammb.kilo.Interpreter.TokenType.*;
+import static java.util.Map.entry;
 
 /**
  * Interpreter.
@@ -29,20 +21,21 @@ public class Interpreter {
         if (args.length > 0) {
             try {
                 String input = Files.readString(Paths.get(args[0]));
-                rep(input);
+                rep(Evaluator.of(), input);
             } catch (IOException e) {
                 System.out.println(e.getMessage());
             }
             return;
         }
 
-        var scanner = new Scanner(System.in);
         System.out.println("Type q to exit.");
+        var scanner = new Scanner(System.in);
+        var evaluator = Evaluator.of();
         for(;;) {
             System.out.print("> ");
             String line = scanner.nextLine();
             if (line.equals("q")) break;
-            rep(line);
+            rep(evaluator, line);
         }
         scanner.close();
     }
@@ -51,7 +44,7 @@ public class Interpreter {
      * Read Evaluate Print.
      * @param input Source
      */
-    private static void rep(String input) {
+    private static void rep(Evaluator evaluator, String input) {
 
         var parser = Parser.of(Lexer.of(input));
         Statements statements = parser.parse();
@@ -59,7 +52,7 @@ public class Interpreter {
             System.out.println(error);
         }
 
-        var evaluated = Evaluator.of().eval(statements);
+        var evaluated = evaluator.eval(statements);
         if (Objects.nonNull(evaluated)) {
             System.out.println(evaluated.inspect());
         }
@@ -97,6 +90,8 @@ public class Interpreter {
         RPAREN(")"),
         LBRACE("{"),
         RBRACE("}"),
+        LBRACKET("["),
+        RBRACKET("]"),
 
         // keywords
         FN("fn"),
@@ -181,6 +176,8 @@ public class Interpreter {
                 case '=' -> nextIf('=') ? new Token(EQ) : new Token(ASSIGN);
                 case '!' -> nextIf('=') ? new Token(NOT_EQ) : new Token(BANG);
                 case '"' -> new Token(STR, readString());
+                case '[' -> new Token(LBRACKET);
+                case ']' -> new Token(RBRACKET);
                 case 0   -> new Token(EOF);
                 default -> {
                     if (isLetter(ch)) {
@@ -610,26 +607,52 @@ public class Interpreter {
          */
         private CallExpression parseCallExpression(Expression function) {
             Token token = curToken;
-            return new CallExpression(token, function, parseCallArguments());
+            return new CallExpression(token, function, parseExpressionList(RPAREN));
         }
 
-        private List<Expression> parseCallArguments() {
-            var args = new ArrayList<Expression>();
-            if (peekTokenIs(TokenType.RPAREN)) {
+        /**
+         * Parse index expression.
+         * <pre>
+         *     <expression>[<expression>]
+         * </pre>
+         * @param left
+         * @return IndexExpression
+         */
+        private IndexExpression parseIndexExpression(Expression left) {
+            Token token = curToken;
+            nextToken();
+            Expression index = parseExpression(Precedence.LOWEST);
+            if (!expectPeek(RBRACKET)) {
+                return null;
+            }
+            return new IndexExpression(token, left, index);
+        }
+
+        /**
+         * Parse array literal.
+         * @return ArrayLiteral
+         */
+        private ArrayLiteral parseArrayLiteral() {
+            return new ArrayLiteral(curToken, parseExpressionList(RBRACKET));
+        }
+
+        private List<Expression> parseExpressionList(TokenType end) {
+            var list = new ArrayList<Expression>();
+            if (peekTokenIs(end)) {
                 nextToken();
-                return Collections.emptyList();
+                return list;
             }
             nextToken();
-            args.add(parseExpression(Precedence.LOWEST));
+            list.add(parseExpression(Precedence.LOWEST));
             while (peekTokenIs(TokenType.COMMA)) {
                 nextToken();
                 nextToken();
-                args.add(parseExpression(Precedence.LOWEST));
+                list.add(parseExpression(Precedence.LOWEST));
             }
-            if (!expectPeek(TokenType.RPAREN)) {
+            if (!expectPeek(end)) {
                 return null;
             }
-            return args;
+            return list;
         }
 
         private boolean curTokenIs(TokenType t) {
@@ -654,17 +677,18 @@ public class Interpreter {
             Expression parse(Parser parser);
 
             /** Prefix parsing functions */
-            Map<TokenType, PrefixParser> map = Map.of(
-                    TokenType.IDENT,  Parser::parseIdentifier,
-                    TokenType.INT,    Parser::parseIntegerLiteral,
-                    TokenType.STR,    Parser::parseStringLiteral,
-                    TokenType.BANG,   Parser::parsePrefixExpression,
-                    TokenType.MINUS,  Parser::parsePrefixExpression,
-                    TokenType.TRUE,   Parser::parseBoolean,
-                    TokenType.FALSE,  Parser::parseBoolean,
-                    TokenType.LPAREN, Parser::parseGroupedExpression,
-                    TokenType.IF,     Parser::parseIfExpression,
-                    TokenType.FN,     Parser::parseFunctionLiteral
+            Map<TokenType, PrefixParser> map = Map.ofEntries(
+                    entry(TokenType.IDENT,    Parser::parseIdentifier),
+                    entry(TokenType.INT,      Parser::parseIntegerLiteral),
+                    entry(TokenType.STR,      Parser::parseStringLiteral),
+                    entry(TokenType.BANG,     Parser::parsePrefixExpression),
+                    entry(TokenType.MINUS,    Parser::parsePrefixExpression),
+                    entry(TokenType.TRUE,     Parser::parseBoolean),
+                    entry(TokenType.FALSE,    Parser::parseBoolean),
+                    entry(TokenType.LPAREN,   Parser::parseGroupedExpression),
+                    entry(TokenType.IF,       Parser::parseIfExpression),
+                    entry(TokenType.FN,       Parser::parseFunctionLiteral),
+                    entry(TokenType.LBRACKET, Parser::parseArrayLiteral)
             );
         }
 
@@ -678,15 +702,16 @@ public class Interpreter {
 
             /** Infix parsing functions */
             Map<TokenType, InfixParser> map = Map.of(
-                    TokenType.PLUS,   Parser::parseInfixExpression,
-                    TokenType.MINUS,  Parser::parseInfixExpression,
-                    TokenType.SLASH,  Parser::parseInfixExpression,
-                    TokenType.ASTER,  Parser::parseInfixExpression,
-                    TokenType.EQ,     Parser::parseInfixExpression,
-                    TokenType.NOT_EQ, Parser::parseInfixExpression,
-                    TokenType.LT,     Parser::parseInfixExpression,
-                    TokenType.GT,     Parser::parseInfixExpression,
-                    TokenType.LPAREN, Parser::parseCallExpression
+                    TokenType.PLUS,     Parser::parseInfixExpression,
+                    TokenType.MINUS,    Parser::parseInfixExpression,
+                    TokenType.SLASH,    Parser::parseInfixExpression,
+                    TokenType.ASTER,    Parser::parseInfixExpression,
+                    TokenType.EQ,       Parser::parseInfixExpression,
+                    TokenType.NOT_EQ,   Parser::parseInfixExpression,
+                    TokenType.LT,       Parser::parseInfixExpression,
+                    TokenType.GT,       Parser::parseInfixExpression,
+                    TokenType.LPAREN,   Parser::parseCallExpression,
+                    TokenType.LBRACKET, Parser::parseIndexExpression
             );
         }
 
@@ -701,7 +726,7 @@ public class Interpreter {
             PROD(TokenType.ASTER, TokenType.SLASH),
             PREFIX,
             CALL(TokenType.LPAREN),
-            ;
+            INDEX(TokenType.LBRACKET);
 
             private final List<TokenType> tokenTypes;
 
@@ -712,8 +737,7 @@ public class Interpreter {
             public static Precedence of(TokenType type) {
                 return Arrays.stream(Precedence.values())
                         .filter(p -> p.tokenTypes.contains(type))
-                        .findFirst()
-                        .orElse(LOWEST);
+                        .findFirst().orElse(LOWEST);
             }
 
             public boolean isLessThan(Precedence that) {
@@ -747,44 +771,40 @@ public class Interpreter {
         }
     }
 
-    static record ReturnStatement(
-            Token token,
-            Expression returnValue) implements Statement {
+    static record ReturnStatement(Token token, Expression returnValue) implements Statement {
         @Override public String toString() {
             return token.literal + " " +
                     (Objects.isNull(returnValue) ? "" : returnValue.toString()) + ";";
         }
     }
 
-    static record Identifier(
-            Token token,
-            String value) implements Expression {
+    static record Identifier(Token token, String value) implements Expression {
         @Override public String toString() {
             return value;
         }
     }
 
-    static record IntegerLiteral(
-            Token token,
-            Integer value) implements Expression {
+    static record IntegerLiteral(Token token, Integer value) implements Expression {
         @Override public String toString() {
             return token.literal;
         }
     }
 
-    static record StringLiteral(
-            Token token,
-            String value) implements Expression {
+    static record StringLiteral(Token token, String value) implements Expression {
         @Override public String toString() {
             return token.literal;
         }
     }
 
-    static record BooleanLiteral(
-            Token token,
-            Boolean value) implements Expression {
+    static record BooleanLiteral(Token token, Boolean value) implements Expression {
         @Override public String toString() {
             return token.literal;
+        }
+    }
+
+    static record ArrayLiteral(Token token, List<Expression> elements) implements Expression {
+        @Override public String toString() {
+            return elements.stream().map(Expression::toString).collect(Collectors.joining(", ", "[", "]"));
         }
     }
 
@@ -849,11 +869,7 @@ public class Interpreter {
         @Override public String toString() {
             StringBuilder sb = new StringBuilder();
             sb.append(token.literal);
-            sb.append("(");
-            StringJoiner sj = new StringJoiner(", ");
-            parameters.forEach(p -> sj.add(p.toString()));
-            sb.append(sj.toString());
-            sb.append(")");
+            sb.append(parameters.stream().map(Identifier::toString).collect(Collectors.joining(", ", "(", ")")));
             sb.append(body.toString());
             return sb.toString();
         }
@@ -866,17 +882,25 @@ public class Interpreter {
         @Override public String toString() {
             StringBuilder sb = new StringBuilder();
             sb.append(function.toString());
-            sb.append("(");
-
-            StringJoiner sj = new StringJoiner(", ");
-            arguments.forEach(a -> sj.add(a.toString()));
-            sb.append(sj.toString());
-
-            sb.append(")");
+            sb.append(arguments.stream().map(Expression::toString).collect(Collectors.joining(", ", "(", ")")));
             return sb.toString();
         }
     }
 
+    static record IndexExpression(
+            Token token, // '['
+            Expression left,
+            Expression index) implements Expression {
+        @Override public String toString() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("(");
+            sb.append(left().toString());
+            sb.append("[");
+            sb.append(index().toString());
+            sb.append("])");
+            return sb.toString();
+        }
+    }
 
     /**
      * Evaluator of AST.
@@ -964,6 +988,18 @@ public class Interpreter {
                     return args.get(0);
                 }
                 return applyFunction(func, args);
+            } else if (node instanceof ArrayLiteral n) {
+                var elements = evalExpressions(n.elements(), env);
+                if (elements.size() == 1 && isError(elements.get(0))) {
+                    return elements.get(0);
+                }
+                return new Array(elements);
+            } else if (node instanceof IndexExpression ie) {
+                var left = eval(ie.left(), env);
+                if (isError(left)) return left;
+                var index = eval(ie.index(), env);
+                if (isError(index)) return index;
+                return evalIndexExpression(left, index);
             }
             return null;
         }
@@ -1076,6 +1112,23 @@ public class Interpreter {
             } else {
                 return NULL;
             }
+        }
+
+        private Any evalIndexExpression(Any left, Any index) {
+            if (left instanceof Array l && index instanceof Int i) {
+                return evalArrayIndexExpression(l, i);
+            } else {
+                return Error.of("index operator not supported: %s", left.getClass().getSimpleName());
+            }
+        }
+
+        private Any evalArrayIndexExpression(Array array, Int index) {
+            int idx = index.val();
+            int max = array.elements().size() - 1;
+            if (idx < 0 || idx > max) {
+                return NULL;
+            }
+            return array.elements().get(idx);
         }
 
         private Any evalIdentifier(Identifier identifier, Environment env) {
@@ -1198,6 +1251,12 @@ public class Interpreter {
             }
         }
 
+        private static record Array(List<Any> elements) implements Any {
+            @Override public String inspect() {
+                return elements.stream().map(Any::inspect).collect(Collectors.joining(", ", "[", "]"));
+            }
+        }
+
         private static record Function(
                 List<Identifier> params,
                 BlockStatement body,
@@ -1208,6 +1267,7 @@ public class Interpreter {
                         body.toString());
             }
         }
+
 
         private static record Error(String message) implements Any {
             public static Error of(String format, Object... obj) {

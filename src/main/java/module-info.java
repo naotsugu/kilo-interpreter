@@ -1,3 +1,3 @@
-module com.mammb.kilofx {
-    exports com.mammb.kilofx;
+module com.mammb.kilo {
+    exports com.mammb.kilo;
 }

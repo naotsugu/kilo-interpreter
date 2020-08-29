@@ -56,3 +56,10 @@ factorial.mk
 120
 ```
 
+
+## Builtin functions
+
+| function | description |
+|----|----|
+|`len`| return string length.|
+
