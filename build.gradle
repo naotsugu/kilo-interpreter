@@ -1,0 +1,31 @@
+plugins {
+    id 'java'
+}
+
+repositories {
+    jcenter()
+}
+
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_14
+    targetCompatibility = JavaVersion.VERSION_14
+    modularity.inferModulePath = true
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.4.2'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.4.2'
+    testImplementation 'org.junit.jupiter:junit-jupiter-params:5.4.2'
+    testImplementation 'org.assertj:assertj-core:3.16.1'
+}
+
+tasks.withType(JavaCompile).each {
+    it.options.compilerArgs.add('--enable-preview')
+}
+
+test {
+    useJUnitPlatform()
+    jvmArgs("--enable-preview")
+}
