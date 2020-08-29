@@ -37,8 +37,8 @@ public class Interpreter {
         }
 
         var scanner = new Scanner(System.in);
+        System.out.println("Type q to exit.");
         for(;;) {
-            System.out.println("Type q to exit.");
             System.out.print("> ");
             String line = scanner.nextLine();
             if (line.equals("q")) break;
@@ -75,6 +75,7 @@ public class Interpreter {
         EOF(""),
         IDENT(""),
         INT(""),
+        STR(""),
 
         // operator
         ASSIGN("="),
@@ -177,9 +178,10 @@ public class Interpreter {
                 case '}' -> new Token(RBRACE);
                 case ',' -> new Token(COMMA);
                 case ';' -> new Token(SEMIC);
-                case 0   -> new Token(EOF);
                 case '=' -> nextIf('=') ? new Token(EQ) : new Token(ASSIGN);
                 case '!' -> nextIf('=') ? new Token(NOT_EQ) : new Token(BANG);
+                case '"' -> new Token(STR, readString());
+                case 0   -> new Token(EOF);
                 default -> {
                     if (isLetter(ch)) {
                         final String id = readIdentifier();
@@ -216,6 +218,14 @@ public class Interpreter {
                 readChar();
             }
             if (pos != position) readPosition -= 1; // step back
+            return input.substring(pos, position);
+        }
+
+        private String readString() {
+            int pos = position + 1;
+            do {
+                readChar();
+            } while (ch != '"' && ch != 0);
             return input.substring(pos, position);
         }
 
@@ -449,6 +459,14 @@ public class Interpreter {
         }
 
         /**
+         * Parse string literal.
+         * @return StringLiteral
+         */
+        private StringLiteral parseStringLiteral() {
+            return new StringLiteral(curToken, curToken.literal);
+        }
+
+        /**
          * Parse prefix expression.
          * like {@code !foo;}
          * <pre>
@@ -639,6 +657,7 @@ public class Interpreter {
             Map<TokenType, PrefixParser> map = Map.of(
                     TokenType.IDENT,  Parser::parseIdentifier,
                     TokenType.INT,    Parser::parseIntegerLiteral,
+                    TokenType.STR,    Parser::parseStringLiteral,
                     TokenType.BANG,   Parser::parsePrefixExpression,
                     TokenType.MINUS,  Parser::parsePrefixExpression,
                     TokenType.TRUE,   Parser::parseBoolean,
@@ -748,6 +767,14 @@ public class Interpreter {
     static record IntegerLiteral(
             Token token,
             Integer value) implements Expression {
+        @Override public String toString() {
+            return token.literal;
+        }
+    }
+
+    static record StringLiteral(
+            Token token,
+            String value) implements Expression {
         @Override public String toString() {
             return token.literal;
         }
@@ -887,6 +914,9 @@ public class Interpreter {
             } else if (node instanceof IntegerLiteral n) {
                 return new Int(n.value());
 
+            } else if (node instanceof StringLiteral n) {
+                return new Str(n.value());
+
             } else if (node instanceof BooleanLiteral n) {
                 return n.value() ? TRUE : FALSE;
 
@@ -977,13 +1007,20 @@ public class Interpreter {
         private Any evalInfixExpression(String operator, Any left, Any right) {
             if (left instanceof Int l && right instanceof Int r) {
                 return evalIntegerInfixExpression(operator, l, r);
+
+            } else if (left instanceof Str l && right instanceof Str r) {
+                    return evalStringInfixExpression(operator, l, r);
+
             } else if (operator.equals("==")) {
                 return (left == right) ? TRUE : FALSE;
+
             } else if (operator.equals("!=")) {
                 return (left != right) ? TRUE : FALSE;
+
             } else if (left.getClass() != right.getClass()) {
                 return Error.of("type mismatch: %s %s %s",
                         left.getClass().getSimpleName(), operator, right.getClass().getSimpleName());
+
             } else {
                 return Error.of("unknown operator: %s %s %s",
                         left.getClass().getSimpleName(), operator, right.getClass().getSimpleName());
@@ -1005,6 +1042,15 @@ public class Interpreter {
                 default -> Error.of("unknown operator: %s %s %s",
                         left.getClass().getSimpleName(), operator, right.getClass().getSimpleName());
             };
+        }
+
+        private Any evalStringInfixExpression(String operator, Str left, Str right) {
+            if ("+".equals(operator)) {
+                return new Str(left.val() + right.val());
+            } else {
+                return Error.of("unknown operator: %s %s %s",
+                        left.getClass().getSimpleName(), operator, right.getClass().getSimpleName());
+            }
         }
 
         private List<Any> evalExpressions(List<Expression> exps, Environment env) {
@@ -1034,6 +1080,9 @@ public class Interpreter {
 
         private Any evalIdentifier(Identifier identifier, Environment env) {
             var val = env.get(identifier.value());
+            if (Objects.isNull(val)) {
+                val = builtins.get(identifier.value());
+            }
             if (Objects.isNull(val)) {
                 return Error.of("identifier not found: " + identifier.value());
             }
@@ -1065,6 +1114,8 @@ public class Interpreter {
                 var extendedEnv = extendFunctionEnv(fn, args);
                 var evaluated = eval(fn.body(), extendedEnv);
                 return unwrapReturnValue(evaluated);
+            } else if (any instanceof Builtin bi) {
+                return bi.fn.apply(args);
             } else {
                 return Error.of("not a function: %s", any.getClass().getSimpleName());
             }
@@ -1123,6 +1174,12 @@ public class Interpreter {
             }
         }
 
+        private static record Str(String val) implements Any {
+            @Override public String inspect() {
+                return val;
+            }
+        }
+
         private static record Bool(Boolean val) implements Any {
             @Override public String inspect() {
                 return val.toString();
@@ -1160,6 +1217,27 @@ public class Interpreter {
                 return "ERROR: " + message;
             }
         }
+
+        private static record Builtin(java.util.function.Function<List<Any>, Any> fn) implements Any {
+            @Override public String inspect() {
+                return "builtin function";
+            }
+        }
+
+        /** Builtin functions. */
+        private static final Map<String, Builtin> builtins = Map.of(
+                "len", new Builtin(args -> {
+                    if (args.size() != 1) {
+                        return Error.of("wrong number of arguments. got=%d, want=1",
+                                args.size());
+                    } else if (args.get(0) instanceof Str str) {
+                        return new Int(str.val().length());
+                    } else {
+                        return Error.of("argument to `len` not supported, got %s",
+                                args.get(0).getClass().getSimpleName());
+                    }
+                })
+        );
     }
 
 }
