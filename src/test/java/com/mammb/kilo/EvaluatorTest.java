@@ -5,6 +5,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static com.mammb.kilo.Interpreter.Parser.*;
 import static com.mammb.kilo.Interpreter.*;
 
 public class EvaluatorTest {
@@ -123,6 +124,28 @@ public class EvaluatorTest {
         Statements statements = Parser.of(Lexer.of(input)).parse();
         var actual = Evaluator.of().eval(statements);
         assertThat(actual.inspect()).isEqualTo("5");
+    }
+
+    @Test
+    void testHashStatement() {
+        String input = """
+            let bob = {"name": "Bob", "age": 99};
+            bob["name"];
+            """;
+        Statements statements = Parser.of(Lexer.of(input)).parse();
+        var actual = Evaluator.of().eval(statements);
+        assertThat(actual.inspect()).isEqualTo("Bob");
+    }
+
+    @Test
+    void testArrayHashStatement() {
+        String input = """
+            let people = [{"name": "Alice", "age": 24}, {"name": "Anna", "age": 28}];
+            people[0]["name"];
+            """;
+        Statements statements = Parser.of(Lexer.of(input)).parse();
+        var actual = Evaluator.of().eval(statements);
+        assertThat(actual.inspect()).isEqualTo("Alice");
     }
 
 }

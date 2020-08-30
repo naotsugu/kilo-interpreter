@@ -8,15 +8,16 @@ $ cloc src/main/java
 ----------------------------------------------------------------------
 Language         files          blank        comment           code
 ----------------------------------------------------------------------
-Java                 2            176            157            913
+Java                 2            190            179            986
 ----------------------------------------------------------------------
-SUM:                 2            176            157            913
+SUM:                 2            190            179            986
 ----------------------------------------------------------------------
+
 ```
 
 Kilo Interpreter does not depend on any library.
 
-Original is (hear)[https://interpreterbook.com/].
+Original is [hear](https://interpreterbook.com/).
 
 
 ## Usage
@@ -56,10 +57,4 @@ factorial.mk
 120
 ```
 
-
-## Builtin functions
-
-| function | description |
-|----|----|
-|`len`| return string length.|
 

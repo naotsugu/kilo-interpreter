@@ -95,4 +95,16 @@ class LexerTest {
         assertThat(lexer.nextToken()).isEqualTo(new Token(TokenType.SEMIC));
     }
 
+    @Test
+    void test004() {
+        var lexer = Lexer.of("""
+                        {"foo": "bar"}
+                        """);
+        assertThat(lexer.nextToken()).isEqualTo(new Token(TokenType.LBRACE));
+        assertThat(lexer.nextToken()).isEqualTo(new Token(TokenType.STR, "foo"));
+        assertThat(lexer.nextToken()).isEqualTo(new Token(TokenType.COLON));
+        assertThat(lexer.nextToken()).isEqualTo(new Token(TokenType.STR, "bar"));
+        assertThat(lexer.nextToken()).isEqualTo(new Token(TokenType.RBRACE));
+    }
+
 }

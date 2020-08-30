@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
-import static com.mammb.kilo.Interpreter.TokenType.*;
 import static java.util.Map.entry;
 
 /**
@@ -47,7 +46,7 @@ public class Interpreter {
     private static void rep(Evaluator evaluator, String input) {
 
         var parser = Parser.of(Lexer.of(input));
-        Statements statements = parser.parse();
+        Parser.Statements statements = parser.parse();
         for (var error : parser.errors) {
             System.out.println(error);
         }
@@ -64,34 +63,22 @@ public class Interpreter {
      */
     enum TokenType {
 
-        ILLEGAL(""),
-        EOF(""),
-        IDENT(""),
-        INT(""),
-        STR(""),
+        ILLEGAL(""), EOF(""), IDENT(""), INT(""), STR(""),
 
         // operator
         ASSIGN("="),
-        PLUS("+"),
-        MINUS("-"),
         BANG("!"),
-        ASTER("*"),
-        SLASH("/"),
-        LT("<"),
-        GT(">"),
-        EQ("=="),
-        NOT_EQ("!="),
+        PLUS("+"), MINUS("-"),
+        ASTER("*"), SLASH("/"),
+        LT("<"), GT(">"),
+        EQ("=="), NOT_EQ("!="),
 
         // delimiter
-        COMMA(","),
-        SEMIC(";"),
+        COMMA(","), SEMIC(";"), COLON(":"),
 
-        LPAREN("("),
-        RPAREN(")"),
-        LBRACE("{"),
-        RBRACE("}"),
-        LBRACKET("["),
-        RBRACKET("]"),
+        LPAREN("("), RPAREN(")"),
+        LBRACE("{"), RBRACE("}"),
+        LBRACKET("["), RBRACKET("]"),
 
         // keywords
         FN("fn"),
@@ -161,32 +148,33 @@ public class Interpreter {
         public Token nextToken() {
             skipWhitespace();
             Token token = switch (ch) {
-                case '+' -> new Token(PLUS);
-                case '-' -> new Token(MINUS);
-                case '*' -> new Token(ASTER);
-                case '/' -> new Token(SLASH);
-                case '<' -> new Token(LT);
-                case '>' -> new Token(GT);
-                case '(' -> new Token(LPAREN);
-                case ')' -> new Token(RPAREN);
-                case '{' -> new Token(LBRACE);
-                case '}' -> new Token(RBRACE);
-                case ',' -> new Token(COMMA);
-                case ';' -> new Token(SEMIC);
-                case '=' -> nextIf('=') ? new Token(EQ) : new Token(ASSIGN);
-                case '!' -> nextIf('=') ? new Token(NOT_EQ) : new Token(BANG);
-                case '"' -> new Token(STR, readString());
-                case '[' -> new Token(LBRACKET);
-                case ']' -> new Token(RBRACKET);
-                case 0   -> new Token(EOF);
+                case '+' -> new Token(TokenType.PLUS);
+                case '-' -> new Token(TokenType.MINUS);
+                case '*' -> new Token(TokenType.ASTER);
+                case '/' -> new Token(TokenType.SLASH);
+                case '<' -> new Token(TokenType.LT);
+                case '>' -> new Token(TokenType.GT);
+                case '(' -> new Token(TokenType.LPAREN);
+                case ')' -> new Token(TokenType.RPAREN);
+                case '{' -> new Token(TokenType.LBRACE);
+                case '}' -> new Token(TokenType.RBRACE);
+                case ',' -> new Token(TokenType.COMMA);
+                case ';' -> new Token(TokenType.SEMIC);
+                case ':' -> new Token(TokenType.COLON);
+                case '=' -> nextIf('=') ? new Token(TokenType.EQ) : new Token(TokenType.ASSIGN);
+                case '!' -> nextIf('=') ? new Token(TokenType.NOT_EQ) : new Token(TokenType.BANG);
+                case '"' -> new Token(TokenType.STR, readString());
+                case '[' -> new Token(TokenType.LBRACKET);
+                case ']' -> new Token(TokenType.RBRACKET);
+                case 0   -> new Token(TokenType.EOF);
                 default -> {
                     if (isLetter(ch)) {
                         final String id = readIdentifier();
-                        yield new Token(lookupIdent(id), id);
+                        yield new Token(TokenType.lookupIdent(id), id);
                     } else if (isDigit(ch)) {
-                        yield new Token(INT, readNumber());
+                        yield new Token(TokenType.INT, readNumber());
                     } else {
-                        yield new Token(ILLEGAL, Character.toString(ch));
+                        yield new Token(TokenType.ILLEGAL, Character.toString(ch));
                     }
                 }
             };
@@ -490,9 +478,8 @@ public class Interpreter {
         private InfixExpression parseInfixExpression(Expression left) {
             Token token = curToken;
             String operator = curToken.literal;
-            Precedence precedence = Precedence.of(token.type);
             nextToken();
-            Expression right = parseExpression(precedence);
+            Expression right = parseExpression(Precedence.of(token.type));
             return new InfixExpression(token, left, operator, right);
         }
 
@@ -559,8 +546,7 @@ public class Interpreter {
             if (!expectPeek(TokenType.LBRACE)) {
                 return null;
             }
-            BlockStatement body = parseBlockStatement();
-            return new FunctionLiteral(token, parameters, body);
+            return new FunctionLiteral(token, parameters, parseBlockStatement());
         }
 
         private BlockStatement parseBlockStatement() {
@@ -591,10 +577,7 @@ public class Interpreter {
                 nextToken();
                 identifiers.add(new Identifier(curToken, curToken.literal));
             }
-            if (!expectPeek(TokenType.RPAREN)) {
-                return null;
-            }
-            return identifiers;
+            return expectPeek(TokenType.RPAREN) ? identifiers : null;
         }
 
         /**
@@ -607,7 +590,8 @@ public class Interpreter {
          */
         private CallExpression parseCallExpression(Expression function) {
             Token token = curToken;
-            return new CallExpression(token, function, parseExpressionList(RPAREN));
+            List<Expression> args = parseExpressionList(TokenType.RPAREN);
+            return new CallExpression(token, function, args);
         }
 
         /**
@@ -622,10 +606,7 @@ public class Interpreter {
             Token token = curToken;
             nextToken();
             Expression index = parseExpression(Precedence.LOWEST);
-            if (!expectPeek(RBRACKET)) {
-                return null;
-            }
-            return new IndexExpression(token, left, index);
+            return expectPeek(TokenType.RBRACKET) ? new IndexExpression(token, left, index) : null;
         }
 
         /**
@@ -633,7 +614,36 @@ public class Interpreter {
          * @return ArrayLiteral
          */
         private ArrayLiteral parseArrayLiteral() {
-            return new ArrayLiteral(curToken, parseExpressionList(RBRACKET));
+            return new ArrayLiteral(curToken, parseExpressionList(TokenType.RBRACKET));
+        }
+
+        /**
+         * Parse hash literal.
+         * <pre>
+         *     {<expression> : <expression>, <expression> : <expression>, ... }
+         * </pre>
+         * @return HashLiteral
+         */
+        private HashLiteral parseHashLiteral() {
+            Token token = curToken;
+            var pairs = new HashMap<Expression, Expression>();
+            while (!peekTokenIs(TokenType.RBRACE)) {
+                nextToken();
+                var key = parseExpression(Precedence.LOWEST);
+                if (!expectPeek(TokenType.COLON)) {
+                    return null;
+                }
+                nextToken();
+                var value = parseExpression(Precedence.LOWEST);
+                pairs.put(key, value);
+                if (!peekTokenIs(TokenType.RBRACE) && !expectPeek(TokenType.COMMA)) {
+                    return null;
+                }
+            }
+            if (!expectPeek(TokenType.RBRACE)) {
+                return null;
+            }
+            return new HashLiteral(token, pairs);
         }
 
         private List<Expression> parseExpressionList(TokenType end) {
@@ -649,10 +659,7 @@ public class Interpreter {
                 nextToken();
                 list.add(parseExpression(Precedence.LOWEST));
             }
-            if (!expectPeek(end)) {
-                return null;
-            }
-            return list;
+            return expectPeek(end) ? list : null;
         }
 
         private boolean curTokenIs(TokenType t) {
@@ -664,8 +671,7 @@ public class Interpreter {
         }
 
         private void peekError(TokenType t) {
-            String msg = String.format("expected next token to be %s, got %s instead", t, peekToken.type);
-            errors.add(msg);
+            errors.add(String.format("expected next token to be %s, got %s instead", t, peekToken.type));
         }
 
         /**
@@ -688,8 +694,8 @@ public class Interpreter {
                     entry(TokenType.LPAREN,   Parser::parseGroupedExpression),
                     entry(TokenType.IF,       Parser::parseIfExpression),
                     entry(TokenType.FN,       Parser::parseFunctionLiteral),
-                    entry(TokenType.LBRACKET, Parser::parseArrayLiteral)
-            );
+                    entry(TokenType.LBRACKET, Parser::parseArrayLiteral),
+                    entry(TokenType.LBRACE,   Parser::parseHashLiteral));
         }
 
         /**
@@ -711,8 +717,7 @@ public class Interpreter {
                     TokenType.LT,       Parser::parseInfixExpression,
                     TokenType.GT,       Parser::parseInfixExpression,
                     TokenType.LPAREN,   Parser::parseCallExpression,
-                    TokenType.LBRACKET, Parser::parseIndexExpression
-            );
+                    TokenType.LBRACKET, Parser::parseIndexExpression);
         }
 
         /**
@@ -744,163 +749,162 @@ public class Interpreter {
                 return this.compareTo(that) < 0;
             }
         }
-    }
 
-    public interface Node { }
-    public interface Statement extends Node { }
-    public interface Expression extends Node { }
+        public interface Node { }
+        public interface Statement extends Node { }
+        public interface Expression extends Node { }
 
-    static record Statements(List<Statement> statements) implements Node {
-        @Override public String toString() {
-            StringBuilder sb = new StringBuilder();
-            for (Statement statement : statements) {
-                sb.append(statement.toString());
+        static record Statements(List<Statement> statements) implements Node {
+            @Override public String toString() {
+                StringBuilder sb = new StringBuilder();
+                for (Statement statement : statements) {
+                    sb.append(statement.toString());
+                }
+                return sb.toString();
             }
-            return sb.toString();
+        }
+
+        static record LetStatement(
+                Token token,
+                Identifier name,
+                Expression value) implements Statement {
+            @Override public String toString() {
+                return token.literal + " " +
+                        name.toString() + " = " +
+                        (Objects.isNull(value) ? "" : value.toString()) + ";";
+            }
+        }
+
+        static record ReturnStatement(Token token, Expression returnValue) implements Statement {
+            @Override public String toString() {
+                return token.literal + " " +
+                        (Objects.isNull(returnValue) ? "" : returnValue.toString()) + ";";
+            }
+        }
+
+        static record Identifier(Token token, String value) implements Expression {
+            @Override public String toString() {
+                return value;
+            }
+        }
+
+        static record IntegerLiteral(Token token, Integer value) implements Expression {
+            @Override public String toString() {
+                return token.literal;
+            }
+        }
+
+        static record StringLiteral(Token token, String value) implements Expression {
+            @Override public String toString() {
+                return token.literal;
+            }
+        }
+
+        static record BooleanLiteral(Token token, Boolean value) implements Expression {
+            @Override public String toString() {
+                return token.literal;
+            }
+        }
+
+        static record ArrayLiteral(Token token, List<Expression> elements) implements Expression {
+            @Override public String toString() {
+                return elements.stream().map(Expression::toString).collect(Collectors.joining(", ", "[", "]"));
+            }
+        }
+
+        static record HashLiteral(Token token, Map<Expression, Expression> pairs) implements Expression {
+            @Override public String toString() {
+                return pairs.entrySet().stream().map(e -> e.getKey().toString() + ":" + e.getValue().toString())
+                        .collect(Collectors.joining(", ", "{", "}"));
+            }
+        }
+
+        static record ExpressionStatement(Token token, Expression expression) implements Statement {
+            @Override public String toString() {
+                return Objects.isNull(expression) ? "" : expression.toString();
+            }
+        }
+
+        static record PrefixExpression(Token token, String operator, Expression right) implements Expression {
+            @Override public String toString() {
+                return "(" + operator + right.toString() + ')';
+            }
+        }
+
+        static record InfixExpression(
+                Token token,
+                Expression left,
+                String operator,
+                Expression right) implements Expression {
+            @Override public String toString() {
+                return "(" + left.toString() + " " + operator + " " + right.toString() + ")";
+            }
+        }
+
+        static record BlockStatement(Token token, List<Statement> statements) implements Statement {
+            @Override public String toString() {
+                StringBuilder sb = new StringBuilder();
+                statements.forEach(sb::append);
+                return sb.toString();
+            }
+        }
+
+        static record IfExpression(
+                Token token,
+                Expression condition,
+                BlockStatement consequence,
+                BlockStatement alternative) implements Expression {
+            @Override
+            public String toString() {
+                StringBuilder sb = new StringBuilder();
+                sb.append("if ").append(condition.toString());
+                sb.append(" ").append(consequence.toString());
+                if (Objects.nonNull(alternative)) sb.append("else " + alternative.toString());
+                return sb.toString();
+            }
+        }
+
+        static record FunctionLiteral(
+                Token token,
+                List<Identifier> parameters,
+                BlockStatement body) implements Expression {
+            @Override public String toString() {
+                StringBuilder sb = new StringBuilder();
+                sb.append(token.literal);
+                sb.append(parameters.stream().map(Identifier::toString).collect(Collectors.joining(", ", "(", ")")));
+                sb.append(body.toString());
+                return sb.toString();
+            }
+        }
+
+        static record CallExpression(
+                Token token,
+                Expression function,
+                List<Expression> arguments) implements Expression {
+            @Override public String toString() {
+                StringBuilder sb = new StringBuilder();
+                sb.append(function.toString());
+                sb.append(arguments.stream().map(Expression::toString).collect(Collectors.joining(", ", "(", ")")));
+                return sb.toString();
+            }
+        }
+
+        static record IndexExpression(
+                Token token, // '['
+                Expression left,
+                Expression index) implements Expression {
+            @Override public String toString() {
+                StringBuilder sb = new StringBuilder();
+                sb.append("(");
+                sb.append(left().toString());
+                sb.append("[");
+                sb.append(index().toString());
+                sb.append("])");
+                return sb.toString();
+            }
         }
     }
 
-    static record LetStatement(
-            Token token,
-            Identifier name,
-            Expression value) implements Statement {
-        @Override public String toString() {
-            return token.literal + " " +
-                    name.toString() + " = " +
-                    (Objects.isNull(value) ? "" : value.toString()) + ";";
-        }
-    }
-
-    static record ReturnStatement(Token token, Expression returnValue) implements Statement {
-        @Override public String toString() {
-            return token.literal + " " +
-                    (Objects.isNull(returnValue) ? "" : returnValue.toString()) + ";";
-        }
-    }
-
-    static record Identifier(Token token, String value) implements Expression {
-        @Override public String toString() {
-            return value;
-        }
-    }
-
-    static record IntegerLiteral(Token token, Integer value) implements Expression {
-        @Override public String toString() {
-            return token.literal;
-        }
-    }
-
-    static record StringLiteral(Token token, String value) implements Expression {
-        @Override public String toString() {
-            return token.literal;
-        }
-    }
-
-    static record BooleanLiteral(Token token, Boolean value) implements Expression {
-        @Override public String toString() {
-            return token.literal;
-        }
-    }
-
-    static record ArrayLiteral(Token token, List<Expression> elements) implements Expression {
-        @Override public String toString() {
-            return elements.stream().map(Expression::toString).collect(Collectors.joining(", ", "[", "]"));
-        }
-    }
-
-    static record ExpressionStatement(
-            Token token,
-            Expression expression) implements Statement {
-        @Override public String toString() {
-            return Objects.isNull(expression) ? "" : expression.toString();
-        }
-    }
-
-    static record PrefixExpression(
-            Token token,
-            String operator,
-            Expression right) implements Expression {
-        @Override public String toString() {
-            return "(" + operator + right.toString() + ')';
-        }
-    }
-
-    static record InfixExpression(
-            Token token,
-            Expression left,
-            String operator,
-            Expression right) implements Expression {
-        @Override public String toString() {
-            return "(" + left.toString() + " " + operator + " " + right.toString() + ")";
-        }
-    }
-
-    static record BlockStatement(
-            Token token,
-            List<Statement> statements) implements Statement {
-        @Override public String toString() {
-            StringBuilder sb = new StringBuilder();
-            statements.forEach(sb::append);
-            return sb.toString();
-        }
-    }
-
-    static record IfExpression(
-            Token token,
-            Expression condition,
-            BlockStatement consequence,
-            BlockStatement alternative) implements Expression {
-        @Override
-        public String toString() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("if");
-            sb.append(condition.toString());
-            sb.append(" ");
-            sb.append(consequence.toString());
-            if (Objects.nonNull(alternative)) sb.append("else " + alternative.toString());
-            return sb.toString();
-        }
-    }
-
-    static record FunctionLiteral(
-            Token token,
-            List<Identifier> parameters,
-            BlockStatement body) implements Expression {
-        @Override public String toString() {
-            StringBuilder sb = new StringBuilder();
-            sb.append(token.literal);
-            sb.append(parameters.stream().map(Identifier::toString).collect(Collectors.joining(", ", "(", ")")));
-            sb.append(body.toString());
-            return sb.toString();
-        }
-    }
-
-    static record CallExpression(
-            Token token,
-            Expression function,
-            List<Expression> arguments) implements Expression {
-        @Override public String toString() {
-            StringBuilder sb = new StringBuilder();
-            sb.append(function.toString());
-            sb.append(arguments.stream().map(Expression::toString).collect(Collectors.joining(", ", "(", ")")));
-            return sb.toString();
-        }
-    }
-
-    static record IndexExpression(
-            Token token, // '['
-            Expression left,
-            Expression index) implements Expression {
-        @Override public String toString() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("(");
-            sb.append(left().toString());
-            sb.append("[");
-            sb.append(index().toString());
-            sb.append("])");
-            return sb.toString();
-        }
-    }
 
     /**
      * Evaluator of AST.
@@ -923,64 +927,62 @@ public class Interpreter {
          * @param node Node to evaluate
          * @return Evaluated object
          */
-        public Any eval(Node node) {
+        public Any eval(Parser.Node node) {
             return eval(node, env);
         }
 
-        private Any eval(Node node, Environment env) {
+        private Any eval(Parser.Node node, Environment env) {
 
-            if (node instanceof Statements n) {
+            if (node instanceof Parser.Statements n) {
                 return evalStatements(n, env);
 
-            } else if (node instanceof ExpressionStatement n) {
+            } else if (node instanceof Parser.ExpressionStatement n) {
                 return eval(n.expression(), env);
 
-            } else if (node instanceof IntegerLiteral n) {
+            } else if (node instanceof Parser.IntegerLiteral n) {
                 return new Int(n.value());
 
-            } else if (node instanceof StringLiteral n) {
+            } else if (node instanceof Parser.StringLiteral n) {
                 return new Str(n.value());
 
-            } else if (node instanceof BooleanLiteral n) {
+            } else if (node instanceof Parser.BooleanLiteral n) {
                 return n.value() ? TRUE : FALSE;
 
-            } else if (node instanceof PrefixExpression n) {
+            } else if (node instanceof Parser.PrefixExpression n) {
                 var right = eval(n.right(), env);
                 if (isError(right)) return right;
                 return evalPrefixExpression(n.operator(), right);
 
-            } else if (node instanceof InfixExpression n) {
+            } else if (node instanceof Parser.InfixExpression n) {
                 var left = eval(n.left(), env);
                 if (isError(left)) return left;
                 var right = eval(n.right(), env);
                 if (isError(right)) return right;
                 return evalInfixExpression(n.operator(), left, right);
 
-            } else if (node instanceof BlockStatement n) {
+            } else if (node instanceof Parser.BlockStatement n) {
                 return evalBlockStatement(n, env);
 
-            } else if (node instanceof IfExpression n) {
+            } else if (node instanceof Parser.IfExpression n) {
                 return evalIfExpression(n, env);
 
-            } else if (node instanceof ReturnStatement n) {
+            } else if (node instanceof Parser.ReturnStatement n) {
                 var val = eval(n.returnValue(), env);
                 if (isError(val)) return val;
                 return new ReturnValue(val);
 
-            } else if (node instanceof LetStatement n) {
+            } else if (node instanceof Parser.LetStatement n) {
                 var val = eval(n.value(), env);
                 if (isError(val)) return val;
                 env.set(n.name().value(), val);
 
-            } else if (node instanceof Identifier n) {
+            } else if (node instanceof Parser.Identifier n) {
                 return evalIdentifier(n, env);
 
-            } else if (node instanceof FunctionLiteral n) {
-                var params = n.parameters();
-                var body = n.body();
-                return new Function(params, body, env);
+            } else if (node instanceof Parser.FunctionLiteral n) {
+                return new Function(n.parameters(), n.body(), env);
 
-            } else if (node instanceof CallExpression n) {
+            } else if (node instanceof Parser.CallExpression n) {
                 var func = eval(n.function(), env);
                 if (isError(func)) return func;
                 var args = evalExpressions(n.arguments(), env);
@@ -988,13 +990,18 @@ public class Interpreter {
                     return args.get(0);
                 }
                 return applyFunction(func, args);
-            } else if (node instanceof ArrayLiteral n) {
+
+            } else if (node instanceof Parser.ArrayLiteral n) {
                 var elements = evalExpressions(n.elements(), env);
                 if (elements.size() == 1 && isError(elements.get(0))) {
                     return elements.get(0);
                 }
                 return new Array(elements);
-            } else if (node instanceof IndexExpression ie) {
+
+            } else if (node instanceof Parser.HashLiteral n) {
+                return evalHashLiteral(n, env);
+
+            } else if (node instanceof Parser.IndexExpression ie) {
                 var left = eval(ie.left(), env);
                 if (isError(left)) return left;
                 var index = eval(ie.index(), env);
@@ -1005,9 +1012,9 @@ public class Interpreter {
         }
 
 
-        private Any evalStatements(Statements statements, Environment env) {
+        private Any evalStatements(Parser.Statements statements, Environment env) {
             Any result = null;
-            for (Statement statement : statements.statements()) {
+            for (Parser.Statement statement : statements.statements()) {
                 result = eval(statement, env);
                 if (result instanceof ReturnValue rv) {
                     return rv.value();
@@ -1019,9 +1026,9 @@ public class Interpreter {
         }
 
 
-        private Any evalBlockStatement(BlockStatement block, Environment env) {
+        private Any evalBlockStatement(Parser.BlockStatement block, Environment env) {
             Any result = null;
-            for (Statement statement : block.statements()) {
+            for (Parser.Statement statement : block.statements()) {
                 result = eval(statement, env);
                 if (result != null) {
                     if (result instanceof ReturnValue || result instanceof Error) {
@@ -1067,31 +1074,29 @@ public class Interpreter {
             int leftVal = left.val();
             int rightVal = right.val();
             return switch (operator) {
-                case "+" -> new Int(leftVal + rightVal);
-                case "-" -> new Int(leftVal - rightVal);
-                case "*" -> new Int(leftVal * rightVal);
-                case "/" -> new Int(leftVal / rightVal);
-                case "<" -> (leftVal < rightVal) ? TRUE : FALSE;
-                case ">" -> (leftVal > rightVal) ? TRUE : FALSE;
+                case "+"  -> new Int(leftVal + rightVal);
+                case "-"  -> new Int(leftVal - rightVal);
+                case "*"  -> new Int(leftVal * rightVal);
+                case "/"  -> new Int(leftVal / rightVal);
+                case "<"  -> (leftVal < rightVal) ? TRUE : FALSE;
+                case ">"  -> (leftVal > rightVal) ? TRUE : FALSE;
                 case "==" -> (leftVal == rightVal) ? TRUE : FALSE;
                 case "!=" -> (leftVal != rightVal) ? TRUE : FALSE;
-                default -> Error.of("unknown operator: %s %s %s",
+                default   -> Error.of("unknown operator: %s %s %s",
                         left.getClass().getSimpleName(), operator, right.getClass().getSimpleName());
             };
         }
 
         private Any evalStringInfixExpression(String operator, Str left, Str right) {
-            if ("+".equals(operator)) {
-                return new Str(left.val() + right.val());
-            } else {
-                return Error.of("unknown operator: %s %s %s",
-                        left.getClass().getSimpleName(), operator, right.getClass().getSimpleName());
-            }
+            return "+".equals(operator)
+                ? new Str(left.val() + right.val())
+                : Error.of("unknown operator: %s %s %s",
+                    left.getClass().getSimpleName(), operator, right.getClass().getSimpleName());
         }
 
-        private List<Any> evalExpressions(List<Expression> exps, Environment env) {
+        private List<Any> evalExpressions(List<Parser.Expression> exps, Environment env) {
             List<Any> result = new ArrayList<>();
-            for (Expression exp : exps) {
+            for (Parser.Expression exp : exps) {
                 var evaluated = eval(exp, env);
                 if (isError(evaluated)) {
                     return List.of(evaluated);
@@ -1101,7 +1106,7 @@ public class Interpreter {
             return result;
         }
 
-        private Any evalIfExpression(IfExpression ie, Environment env) {
+        private Any evalIfExpression(Parser.IfExpression ie, Environment env) {
             var condition = eval(ie.condition(), env);
             if (isError(condition)) {
                 return condition;
@@ -1115,23 +1120,31 @@ public class Interpreter {
         }
 
         private Any evalIndexExpression(Any left, Any index) {
-            if (left instanceof Array l && index instanceof Int i) {
-                return evalArrayIndexExpression(l, i);
+            if (left instanceof Array array && index instanceof Int idx) {
+                return evalArrayIndexExpression(array, idx);
+            } else if (left instanceof Hash hash) {
+                return evalHashIndexExpression(hash, index);
             } else {
                 return Error.of("index operator not supported: %s", left.getClass().getSimpleName());
             }
         }
 
         private Any evalArrayIndexExpression(Array array, Int index) {
-            int idx = index.val();
-            int max = array.elements().size() - 1;
-            if (idx < 0 || idx > max) {
-                return NULL;
-            }
-            return array.elements().get(idx);
+            return (index.val() < 0 || index.val() > (array.elements().size() - 1))
+                    ? NULL
+                    : array.elements().get(index.val());
         }
 
-        private Any evalIdentifier(Identifier identifier, Environment env) {
+        private Any evalHashIndexExpression(Hash hash, Any key) {
+            if (key instanceof Hashable hashable) {
+                HashPair pair = hash.hash().get(hashable.hashKey());
+                return Objects.nonNull(pair) ? pair.value() : null;
+            } else {
+                return Error.of("unusable as hash key: %s", key.getClass().getSimpleName());
+            }
+        }
+
+        private Any evalIdentifier(Parser.Identifier identifier, Environment env) {
             var val = env.get(identifier.value());
             if (Objects.isNull(val)) {
                 val = builtins.get(identifier.value());
@@ -1155,11 +1168,20 @@ public class Interpreter {
                     : Error.of("unknown operator: -%s", right.getClass().getSimpleName());
         }
 
-        private boolean isTruthy(Any any) {
-            if (any == NULL) return false;
-            if (any == TRUE) return true;
-            if (any == FALSE) return false;
-            return true;
+        private Any evalHashLiteral(Parser.HashLiteral node, Environment env) {
+            var pairs = new HashMap<HashKey, HashPair>();
+            for (var entry : node.pairs.entrySet()) {
+                var key = eval(entry.getKey(), env);
+                if (isError(key)) return key;
+                if (key instanceof Hashable hashable) {
+                    var value = eval(entry.getValue(), env);
+                    if (isError(value)) return value;
+                    pairs.put(hashable.hashKey(), new HashPair(key, value));
+                } else {
+                    return Error.of("unusable as hash key: %s", key.getClass().getSimpleName());
+                }
+            }
+            return new Hash(pairs);
         }
 
         private Any applyFunction(Any any, List<Any> args) {
@@ -1186,6 +1208,10 @@ public class Interpreter {
             return (any instanceof ReturnValue rv) ? rv.value() : any;
         }
 
+        private boolean isTruthy(Any any) {
+            return any != NULL && any != FALSE;
+        }
+
         private boolean isError(Any any) {
             return any instanceof Error;
         }
@@ -1194,6 +1220,9 @@ public class Interpreter {
         private static final Bool FALSE = new Bool(Boolean.FALSE);
         private static final Null NULL  = new Null();
 
+        /**
+         * Environment.
+         */
         private static record Environment(Map<String, Any> map, Environment outer) {
 
             public static Environment of() {
@@ -1217,25 +1246,35 @@ public class Interpreter {
             }
         }
 
+
         interface Any {
             String inspect();
         }
 
-        private static record Int(Integer val) implements Any {
+        private static record Int(Integer val) implements Any, Hashable {
             @Override public String inspect() {
                 return val.toString();
             }
+            @Override public HashKey hashKey() {
+                return new HashKey(Int.class, val);
+            }
         }
 
-        private static record Str(String val) implements Any {
+        private static record Str(String val) implements Any, Hashable {
             @Override public String inspect() {
                 return val;
             }
+            @Override public HashKey hashKey() {
+                return new HashKey(Str.class, val.hashCode());
+            }
         }
 
-        private static record Bool(Boolean val) implements Any {
+        private static record Bool(Boolean val) implements Any, Hashable {
             @Override public String inspect() {
                 return val.toString();
+            }
+            @Override public HashKey hashKey() {
+                return new HashKey(Bool.class, val ? 1 : 0);
             }
         }
 
@@ -1257,17 +1296,26 @@ public class Interpreter {
             }
         }
 
-        private static record Function(
-                List<Identifier> params,
-                BlockStatement body,
-                Environment env) implements Any {
+        private interface Hashable {
+            HashKey hashKey();
+        }
+        private static record HashPair(Any key, Any value) { }
+        private static record HashKey(Class<? extends Hashable> type, int value) { }
+        private static record Hash(Map<HashKey, HashPair> hash) implements Any {
             @Override public String inspect() {
-                return String.format("fn(%s) {\n%s\n}",
-                        params.stream().map(i -> i.toString()).collect(Collectors.joining()),
-                        body.toString());
+                return hash.values().stream().map(e -> e.key().inspect() + ":" + e.value().inspect())
+                        .collect(Collectors.joining(", ", "{", "}"));
             }
         }
 
+        private static record Function(
+                List<Parser.Identifier> params, Parser.BlockStatement body, Environment env) implements Any {
+            @Override public String inspect() {
+                return String.format("fn(%s) {\n%s\n}",
+                        params.stream().map(Parser.Identifier::toString).collect(Collectors.joining()),
+                        body.toString());
+            }
+        }
 
         private static record Error(String message) implements Any {
             public static Error of(String format, Object... obj) {
@@ -1288,10 +1336,11 @@ public class Interpreter {
         private static final Map<String, Builtin> builtins = Map.of(
                 "len", new Builtin(args -> {
                     if (args.size() != 1) {
-                        return Error.of("wrong number of arguments. got=%d, want=1",
-                                args.size());
+                        return Error.of("wrong number of arguments. got=%d, want=1", args.size());
                     } else if (args.get(0) instanceof Str str) {
                         return new Int(str.val().length());
+                    } else if (args.get(0) instanceof Array array) {
+                        return new Int(array.elements().size());
                     } else {
                         return Error.of("argument to `len` not supported, got %s",
                                 args.get(0).getClass().getSimpleName());

@@ -5,6 +5,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static com.mammb.kilo.Interpreter.Parser.*;
 import static com.mammb.kilo.Interpreter.*;
 
 public class ParserTest {
@@ -48,6 +49,21 @@ public class ParserTest {
         ReturnStatement s1 = (ReturnStatement) statements.statements().get(1);
         assertThat(s1.token().literal()).isEqualTo("return");
         assertThat(s1.returnValue().toString()).isEqualTo("9090");
+    }
+
+    @Test
+    void testHashLiteral() {
+        String input = """
+                {"one": 1, "two": 2, "three": 3}
+                """;
+        Statement stmt = Parser.of(Lexer.of(input)).parse().statements().get(0);
+
+        assertThat(stmt).isInstanceOf(ExpressionStatement.class);
+        Expression exp = ((ExpressionStatement) stmt).expression();
+        assertThat(exp).isInstanceOf(HashLiteral.class);
+        HashLiteral hash = (HashLiteral) exp;
+        Expression val = hash.pairs().get(new StringLiteral(new Token(TokenType.STR, "one"), "one"));
+        assertThat(val.toString()).isEqualTo("1");
     }
 
 
