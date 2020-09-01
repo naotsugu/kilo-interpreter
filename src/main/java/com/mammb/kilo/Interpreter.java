@@ -1345,6 +1345,12 @@ public class Interpreter {
                         return Error.of("argument to `len` not supported, got %s",
                                 args.get(0).getClass().getSimpleName());
                     }
+                }),
+                "puts", new Builtin(args -> {
+                    for (Any any : args) {
+                        System.out.println(any.inspect());
+                    }
+                    return null;
                 })
         );
     }
