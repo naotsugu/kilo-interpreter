@@ -22,14 +22,12 @@ Original is [hear](https://interpreterbook.com/).
 
 ## Usage
 
-JDK 14+ is required(with `--enable-preview`).
-
 Kilo Interpreter is Single-File Source-Code Programs.
 
 So just run the following command:
 
 ```
-$ java --source 14 --enable-preview src/main/java/com/mammb/kilo/Interpreter.java
+$ java src/main/java/com/mammb/kilo/Interpreter.java
 ```
 
 
@@ -51,9 +49,7 @@ factorial(5);
 
 Run it :
 ```
-$ java --source 14 --enable-preview \
-src/main/java/com/mammb/kilo/Interpreter.java \
-factorial.mk
+$ java src/main/java/com/mammb/kilo/Interpreter.java factorial.mk
 120
 ```
 
